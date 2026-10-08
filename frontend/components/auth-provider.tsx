@@ -93,7 +93,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setState({ status: "signedOut", user: null })
           break
         case "signInWithRedirect_failure":
-          toast.error("Google sign-in failed. Please try again.")
+          // Show Cognito's actual reason (e.g. redirect_mismatch, attribute mapping).
+          console.error("signInWithRedirect_failure", payload.data)
+          toast.error(`Sign-in failed: ${authErrorMessage((payload.data as { error?: unknown })?.error ?? payload.data)}`, { duration: 60000 })
           break
       }
     })
