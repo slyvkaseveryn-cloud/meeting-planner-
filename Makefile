@@ -39,6 +39,8 @@ AUTH_STACK ?= $(PROJECT_NAME)-auth
 APP_STACK ?= $(PROJECT_NAME)-backend
 ECR_STACK ?= $(PROJECT_NAME)-ecr
 FRONTEND_STACK ?= $(PROJECT_NAME)-frontend
+REPORTS_STACK ?= $(PROJECT_NAME)-reports
+API_FUNCTION ?= $(PROJECT_NAME)-backend
 IMAGE_TAG ?= latest
 # x86_64 or arm64. arm64 is ~20% cheaper on Lambda and builds natively on
 # Apple Silicon; the image platform is derived from it so the two cannot drift.
@@ -94,7 +96,8 @@ endef
 
 .PHONY: help up up-build down down-v logs ps migrate revision seed test lint fmt shell-backend psql \
         aws-whoami aws-deploy aws-deploy-auth aws-auth-env aws-ecr aws-push aws-deploy-backend aws-migrate aws-url aws-status aws-logs \
-        aws-frontend-cert aws-deploy-frontend aws-frontend-url aws-destroy
+        aws-frontend-cert aws-deploy-frontend aws-frontend-url aws-destroy \
+        aws-deploy-reports report-now reports-ls reports-logs
 
 help:
 	@grep -hE '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -247,7 +250,7 @@ aws-deploy-backend: aws-push ## Deploy the backend to AWS (Lambda function URL +
 				ImageUri="$$repo@$$digest" \
 				"Architecture=$(AWS_LAMBDA_ARCH)" \
 				"DbPassword=$(AWS_DB_PASSWORD)" \
-				"AppTimezone=$(APP_TIMEZONE)" \
+				"AppTimezone=$(or $(APP_TIMEZONE),Europe/Kyiv)" \
 				"CorsOrigins=$$cors" \
 				"CognitoUserPoolId=$$pool" \
 				"CognitoClientId=$$client" \
@@ -347,6 +350,85 @@ aws-deploy-frontend: ## Deploy the frontend to S3 + CloudFront, built against th
 
 aws-frontend-url: ## Print the deployed site URL
 	@$(call stack-output,$(FRONTEND_STACK),SiteUrl)
+
+# --- weekly report (Lab 5) ----------------------------------------------------
+# Everything the builder needs is read from the running API function, so these
+# targets work however that function was deployed: its image repository, VPC,
+# subnets, security group and DATABASE_URL.
+
+api-config = $(AWS) lambda get-function-configuration --function-name $(API_FUNCTION)
+
+aws-deploy-reports: ## Build+push the backend image, then deploy infra/reports.yml (queue, builder, mailer, schedule, SES)
+	@test -n "$(REPORTS_SENDER)" || { echo "REPORTS_SENDER is empty — set it in .env (the From address)"; exit 1; }
+	@image=$$($(AWS) lambda get-function --function-name $(API_FUNCTION) --query Code.ImageUri --output text | tr -d '[:space:]'); \
+		repo=$${image%@*}; repo=$${repo%:*}; \
+		tag=reports-$$(git rev-parse --short HEAD); \
+		echo "Building $$repo:$$tag ($(IMAGE_PLATFORM))"; \
+		$(AWS) ecr get-login-password | docker login --username AWS --password-stdin "$${repo%%/*}" || exit 1; \
+		docker build --platform $(IMAGE_PLATFORM) --provenance=false \
+			-f backend/Dockerfile.lambda -t "$$repo:$$tag" ./backend || exit 1; \
+		docker push "$$repo:$$tag" || exit 1; \
+		digest=$$($(AWS) ecr describe-images --repository-name "$${repo#*/}" --image-ids imageTag=$$tag \
+			--query 'imageDetails[0].imageDigest' --output text | tr -d '[:space:]'); \
+		subnets=$$($(api-config) --query 'VpcConfig.SubnetIds' --output text | tr '[:space:]' ',' | sed 's/,*$$//'); \
+		sg=$$($(api-config) --query 'VpcConfig.SecurityGroupIds[0]' --output text | tr -d '[:space:]'); \
+		vpc=$$($(api-config) --query 'VpcConfig.VpcId' --output text | tr -d '[:space:]'); \
+		dburl=$$($(api-config) --query 'Environment.Variables.DATABASE_URL' --output text | tr -d '[:space:]'); \
+		arch=$$($(api-config) --query 'Architectures[0]' --output text | tr -d '[:space:]'); \
+		rts=$$( { $(AWS) ec2 describe-route-tables --filters "Name=association.subnet-id,Values=$$subnets" \
+				--query 'RouteTables[].RouteTableId' --output text; \
+			$(AWS) ec2 describe-route-tables --filters Name=vpc-id,Values=$$vpc Name=association.main,Values=true \
+				--query 'RouteTables[].RouteTableId' --output text; } | tr '[:space:]' '\n' | sed '/^$$/d' | sort -u | paste -sd, -); \
+		endpoint=$$($(AWS) cloudformation describe-stacks --stack-name $(REPORTS_STACK) \
+			--query 'Stacks[0].Parameters[?ParameterKey==`CreateS3Endpoint`].ParameterValue' --output text 2>/dev/null | tr -d '[:space:]'); \
+		if [ -z "$$endpoint" ] || [ "$$endpoint" = "None" ]; then \
+			n=$$($(AWS) ec2 describe-vpc-endpoints --filters Name=vpc-id,Values=$$vpc \
+				Name=service-name,Values=com.amazonaws.$(AWS_REGION).s3 Name=vpc-endpoint-type,Values=Gateway \
+				--query 'length(VpcEndpoints)' --output text | tr -d '[:space:]'); \
+			if [ "$$n" = "0" ]; then endpoint=true; else endpoint=false; fi; \
+		fi; \
+		echo "vpc=$$vpc subnets=$$subnets sg=$$sg routes=$$rts s3-endpoint=$$endpoint arch=$$arch"; \
+		$(call clear-failed-create,$(REPORTS_STACK)); \
+		$(AWS) cloudformation deploy \
+			--stack-name $(REPORTS_STACK) \
+			--template-file infra/reports.yml \
+			--capabilities CAPABILITY_IAM \
+			--no-fail-on-empty-changeset \
+			$(STACK_TAGS) \
+			--parameter-overrides \
+				"ProjectName=$(PROJECT_NAME)" \
+				"ImageUri=$$repo@$$digest" \
+				"Architecture=$$arch" \
+				"VpcId=$$vpc" \
+				"SubnetIds=$$subnets" \
+				"SecurityGroupId=$$sg" \
+				"RouteTableIds=$$rts" \
+				"CreateS3Endpoint=$$endpoint" \
+				"DatabaseUrl=$$dburl" \
+				"AppTimezone=$(or $(APP_TIMEZONE),Europe/Kyiv)" \
+				"ScheduleExpression=$(or $(REPORTS_SCHEDULE),cron(0 7 ? * MON *))" \
+				"SenderEmail=$(REPORTS_SENDER)" \
+				"RecipientEmails=$(or $(REPORTS_RECIPIENTS),$(REPORTS_SENDER))" \
+				"SenderDomain=$(REPORTS_DOMAIN)" \
+				"VerifyRecipient=$(or $(REPORTS_VERIFY_RECIPIENT),false)" \
+				"FailWeek=$(REPORTS_FAIL_WEEK)"
+	@$(AWS) cloudformation describe-stacks --stack-name $(REPORTS_STACK) --query 'Stacks[0].Outputs' --output table
+
+report-now: ## Request a report on demand through SQS: make report-now WEEK=2026-W40 (empty = last week)
+	@queue=$$($(call stack-output,$(REPORTS_STACK),QueueUrl) | tr -d '[:space:]'); \
+		week='$(WEEK)'; if [ -n "$$week" ]; then week="\"$$week\""; else week=null; fi; \
+		$(AWS) sqs send-message --queue-url "$$queue" \
+			--message-body "{\"week\": $$week, \"source\": \"make\"}" --query MessageId --output text
+
+reports-ls: ## List the reports in S3
+	@bucket=$$($(call stack-output,$(REPORTS_STACK),ReportsBucket) | tr -d '[:space:]'); \
+		$(AWS) s3 ls "s3://$$bucket/reports/" --recursive
+
+reports-logs: ## Show the trigger log lines of the builder and the mailer (last 24 h)
+	$(AWS) logs filter-log-events --log-group-name /aws/lambda/$(PROJECT_NAME)-report-builder \
+		--start-time $$(( ($$(date +%s) - 86400) * 1000 )) --filter-pattern '"triggered"' --query 'events[].message' --output text
+	$(AWS) logs filter-log-events --log-group-name /aws/lambda/$(PROJECT_NAME)-report-mailer \
+		--start-time $$(( ($$(date +%s) - 86400) * 1000 )) --filter-pattern '"triggered"' --query 'events[].message' --output text
 
 aws-destroy: ## Delete every stack, including the database and its data
 	$(require-aws-credentials)
