@@ -1,10 +1,12 @@
 import { getAccessToken } from "@/lib/auth";
 import type {
+  AgendaSaveInput,
   ApiErrorBody,
   ApiErrorDetail,
   Meeting,
   MeetingCreateInput,
   MeetingList,
+  ParseResult,
   UserProfile,
 } from "@/lib/types";
 
@@ -96,6 +98,55 @@ export function updateMeeting(id: string, payload: MeetingCreateInput) {
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export function saveAgenda(id: string, payload: AgendaSaveInput) {
+  return request<Meeting>(`/api/v1/meetings/${id}/agenda`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** The agenda parser's function URL. It only suggests: saving goes through the API. */
+export const PARSER_URL = process.env.NEXT_PUBLIC_PARSER_URL ?? "";
+
+export async function parseAgenda(
+  text: string,
+  signal?: AbortSignal,
+): Promise<ParseResult> {
+  const token = await getAccessToken();
+  const now = new Date();
+  // The user's "Monday" is in the user's time zone, not the function's UTC.
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let response: Response;
+  try {
+    response = await fetch(PARSER_URL, {
+      method: "POST",
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ text, today, tz }),
+    });
+  } catch (caught) {
+    if (signal?.aborted) throw caught;
+    throw new ApiError(
+      0,
+      "network_error",
+      "Could not reach the agenda parser.",
+      [],
+    );
+  }
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      (payload as { error?: string } | null)?.error ??
+      `status ${response.status}`;
+    throw new ApiError(response.status, "parse_error", message, []);
+  }
+  return payload as ParseResult;
 }
 
 export function deleteMeeting(id: string) {

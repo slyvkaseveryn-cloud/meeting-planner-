@@ -9,7 +9,7 @@ from app.config import settings
 from app.models import Meeting
 from app.repositories.meeting import MeetingRepository
 from app.repositories.user import UserRepository
-from app.schemas import MeetingCreate
+from app.schemas import AgendaSave, MeetingCreate
 
 
 class MeetingNotFoundError(Exception):
@@ -66,6 +66,20 @@ class MeetingService:
     async def update(self, meeting_id: uuid.UUID, payload: MeetingCreate) -> Meeting:
         meeting = await self.get(meeting_id)
         return await self.repo.update(meeting, payload)
+
+    async def save_agenda(self, meeting_id: uuid.UUID, payload: AgendaSave) -> Meeting:
+        """Store what the user saved, and next to it what the model had suggested."""
+        meeting = await self.get(meeting_id)
+        agenda = payload.model_dump(mode="json", include={"items", "action_items"})
+        suggestion = None
+        if payload.ai_suggestion is not None:
+            suggestion = {
+                "agenda": payload.ai_suggestion,
+                "model": payload.ai_model,
+                "prompt_version": payload.prompt_version,
+                "saved_at": datetime.now(settings.tz).isoformat(),
+            }
+        return await self.repo.save_agenda(meeting, agenda, suggestion)
 
     async def delete(self, meeting_id: uuid.UUID) -> None:
         if not await self.repo.delete(meeting_id):

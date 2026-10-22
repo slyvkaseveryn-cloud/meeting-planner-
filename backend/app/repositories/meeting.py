@@ -87,6 +87,15 @@ class MeetingRepository:
         await self.session.refresh(meeting)
         return meeting
 
+    async def save_agenda(
+        self, meeting: Meeting, agenda: dict, ai_suggestion: dict | None
+    ) -> Meeting:
+        meeting.agenda = agenda
+        meeting.ai_suggestion = ai_suggestion
+        await self.session.commit()
+        await self.session.refresh(meeting)
+        return meeting
+
     async def delete(self, meeting_id: uuid.UUID) -> bool:
         result = await self.session.execute(
             delete(Meeting).where(Meeting.id == meeting_id, Meeting.owner_id == self.owner_id)

@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Paste an agenda (Lab 6): the agenda-parser Lambda behind its own function URL,
+  outside the VPC, calling Claude on Amazon Bedrock. It receives text and
+  returns JSON; it needs no database and never writes anything. Saving goes
+  through the normal API. Plus a $5 monthly AWS Budgets alarm.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Prefix for resource names, and the PROJECT_NAME tag.
+
+  ImageUri:
+    Type: String
+    Description: Backend image with app/ai in it, pinned by digest.
+
+  Architecture:
+    Type: String
+    Default: x86_64
+    AllowedValues: [x86_64, arm64]
+
+  ParserModel:
+    Type: String
+    Default: anthropic.claude-opus-5-5
+    Description: Bedrock model ID. Configuration, not code.
+
+  CorsOrigins:
+    Type: CommaDelimitedList
+    Description: Origins of the site that may call the parser (e.g. https://d123.cloudfront.net,http://localhost:3000).
+
+  AppTimezone:
+    Type: String
+    Default: Europe/Kyiv
+
+  CognitoRegion:
+    Type: String
+  CognitoUserPoolId:
+    Type: String
+  CognitoClientId:
+    Type: String
+
+  BudgetEmail:
+    Type: String
+    Description: Who gets the AWS Budgets alarm.
+
+  BudgetUsd:
+    Type: Number
+    Default: 5
+
+Resources:
+  ParserRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: call-claude
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # "*" for now: narrowing it to one model and one region is a
+              # discussion question (see docs/adr/0006-llm-agenda-parsing.md).
+              - Effect: Allow
+                Action:
+                  - bedrock-mantle:CreateInference
+                  - bedrock:InvokeModel
+                Resource: "*"
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ParserLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-agenda-parser"
+      RetentionInDays: 14
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ParserFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-agenda-parser"
+      Description: Parses pasted text into an agenda with Claude on Bedrock (suggests, never writes)
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["app.ai.agenda_lambda.handler"]
+      Architectures:
+        - !Ref Architecture
+      Role: !GetAtt ParserRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      # No VpcConfig: no database, and the internet (Bedrock, Cognito's JWKS)
+      # without a NAT gateway or an endpoint.
+      LoggingConfig:
+        LogGroup: !Ref ParserLogGroup
+      Environment:
+        Variables:
+          PARSER_MODEL: !Ref ParserModel
+          BEDROCK_REGION: !Ref AWS::Region
+          APP_TIMEZONE: !Ref AppTimezone
+          COGNITO_REGION: !Ref CognitoRegion
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          # Never opened: the parser has no database. Set so settings load.
+          DATABASE_URL: postgresql+asyncpg://unused@localhost/unused
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  # Public, but the handler rejects any request without a valid Cognito token.
+  ParserUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ParserFunction.Arn
+      AuthType: NONE
+      InvokeMode: BUFFERED
+      Cors:
+        AllowOrigins: !Ref CorsOrigins
+        AllowMethods: [POST]
+        AllowHeaders: [authorization, content-type]
+        MaxAge: 3600
+
+  ParserUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ParserFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  ParserUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ParserFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # The cheapest insurance in the course.
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${ProjectName}-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  ParserUrl:
+    Description: NEXT_PUBLIC_PARSER_URL for the frontend build
+    Value: !GetAtt ParserUrl.FunctionUrl
+  ParserFunction:
+    Value: !Ref ParserFunction

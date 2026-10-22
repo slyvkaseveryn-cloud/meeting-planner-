@@ -1,7 +1,8 @@
 """Pydantic request/response models for the meetings API."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from typing import Any
 
 from pydantic import (
     BaseModel,
@@ -93,6 +94,31 @@ class MeetingCreate(BaseModel):
         return value
 
 
+class AgendaItemIn(BaseModel):
+    topic: str = Field(min_length=1, max_length=300)
+    owner: str | None = Field(default=None, max_length=200)
+    minutes: int | None = Field(default=None, ge=1, le=480)
+
+
+class ActionItemIn(BaseModel):
+    task: str = Field(min_length=1, max_length=500)
+    owner: str | None = Field(default=None, max_length=200)
+    due: date | None = None
+
+
+class Agenda(BaseModel):
+    items: list[AgendaItemIn] = Field(default_factory=list, max_length=50)
+    action_items: list[ActionItemIn] = Field(default_factory=list, max_length=50)
+
+
+class AgendaSave(Agenda):
+    """PUT /meetings/{id}/agenda. The AI fields are optional: typing by hand still works."""
+
+    ai_suggestion: dict[str, Any] | None = None
+    ai_model: str | None = Field(default=None, max_length=100)
+    prompt_version: str | None = Field(default=None, max_length=50)
+
+
 class MeetingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -103,6 +129,7 @@ class MeetingRead(BaseModel):
     starts_at: datetime
     ends_at: datetime
     participants: list[ParticipantRead]
+    agenda: Agenda | None = None
     created_at: datetime
     updated_at: datetime
 
