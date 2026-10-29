@@ -110,8 +110,9 @@ the tokens, for network access alone. Keeping the parser outside the VPC means i
 `prompt_version`) next to the `agenda` the user actually saved, so the user's edits are the ground
 truth. Per agenda, compare field by field (title, starts_at, duration, each item's topic/owner/minutes,
 action items). The score is the **share of fields the user did not have to change**, plus the share of
-agendas saved with zero edits. Replay the same 500 pasted texts (or a held-out sample) through v2 and
-score its output against the saved agendas in the same way. That way both versions are measured on
-identical inputs. v2 wins if its field accuracy is higher, with a confidence interval (bootstrap over
-the 500), at no worse cost per parse and no new injection failures. Wrong dates and owners count
+agendas saved with zero edits. The pasted text itself is not stored, so the 500 cannot be replayed.
+Instead, run an A/B test: send a random half of new parses to agenda-v2 (the version is already in the log
+line and in `ai_suggestion`), and after a few hundred saves compare the two scores. v2 wins if its field
+accuracy is higher, with a confidence interval (bootstrap), at no worse cost per parse and no new injection
+failures. Wrong dates and owners count
 double, because users notice them last.
