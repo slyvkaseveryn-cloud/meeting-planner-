@@ -6,6 +6,13 @@
 provider "aws" {
   alias  = "eu_north_1"
   region = var.cognito_region
+
+  default_tags {
+    tags = {
+      PROJECT_NAME = var.project_name
+      ManagedBy    = "terraform"
+    }
+  }
 }
 
 resource "aws_cognito_user_pool" "site" {
