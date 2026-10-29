@@ -436,7 +436,7 @@ reports-logs: ## Show the trigger log lines of the builder and the mailer (last 
 # llm-hello and parse run on your laptop, in the backend image, with the AWS
 # credentials from ~/.aws (AWS_PROFILE is passed through).
 LOCAL_AI_IMAGE = $(PROJECT_NAME)-ai-local
-PARSER_MODEL ?= anthropic.claude-opus-5-5
+PARSER_MODEL ?= us.anthropic.claude-opus-4-6-v1
 local-ai = docker build -q -f backend/Dockerfile.lambda -t $(LOCAL_AI_IMAGE) ./backend >/dev/null && \
 	docker run --rm -i --entrypoint python -v "$(HOME)/.aws:/root/.aws:ro" -e HOME=/root \
 		-e AWS_PROFILE -e AWS_REGION=us-east-1 -e PARSER_MODEL=$(PARSER_MODEL) $(LOCAL_AI_IMAGE)

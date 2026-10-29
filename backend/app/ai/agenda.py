@@ -27,6 +27,9 @@ PRICES: dict[str, tuple[float, float]] = {
     "anthropic.claude-opus-5-5": (4.00, 20.00),
     "anthropic.claude-sonnet-5-5": (2.00, 10.00),
     "anthropic.claude-haiku-5-5": (0.10, 0.50),
+    # Fallback while the account has no access to the 5.x models (see the lab doc).
+    "us.anthropic.claude-opus-4-6-v1": (5.00, 25.00),
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0": (1.00, 5.00),
 }
 
 
@@ -77,9 +80,23 @@ SYSTEM = (
 
 @lru_cache
 def _client():
+    # Inference-profile IDs ("us.anthropic...", the 4.x models) are served by
+    # InvokeModel, not by the Mantle endpoint.
+    if settings.parser_model.startswith(("us.", "global.")):
+        from anthropic import AnthropicBedrock
+
+        return AnthropicBedrock(aws_region=settings.bedrock_region)
     from anthropic import AnthropicBedrockMantle
 
     return AnthropicBedrockMantle(aws_region=settings.bedrock_region)
+
+
+def _model_args() -> dict:
+    # The 4.x models on InvokeModel take neither the SDK's newer API version
+    # nor output_config.
+    if settings.parser_model.startswith(("us.", "global.")):
+        return {"extra_body": {"anthropic_version": "bedrock-2023-05-31"}}
+    return {"output_config": {"effort": "low"}}
 
 
 def cost_usd(model: str, usage: dict) -> float:
@@ -102,7 +119,7 @@ def parse_agenda(text: str, today: date, tz: str) -> tuple[ParsedAgenda, dict]:
         msg = _client().messages.create(
             model=settings.parser_model,
             max_tokens=4096,
-            output_config={"effort": "low"},
+            **_model_args(),
             system=SYSTEM,
             tools=[RECORD_AGENDA],
             messages=messages,
@@ -137,7 +154,7 @@ def hello() -> None:
     msg = _client().messages.create(
         model=settings.parser_model,
         max_tokens=1024,
-        output_config={"effort": "low"},
+        **_model_args(),
         messages=[{"role": "user", "content": "In one sentence: what is an ISO week?"}],
     )
     print(next(b.text for b in msg.content if b.type == "text"))

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     cognito_jwks: str = ""
 
     # The agenda parser (Lab 6). The model is configuration, not code.
-    parser_model: str = "anthropic.claude-opus-5-5"
+    parser_model: str = "us.anthropic.claude-opus-4-6-v1"
     bedrock_region: str = "us-east-1"
 
     @field_validator("app_timezone")

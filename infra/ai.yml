@@ -21,7 +21,7 @@ Parameters:
 
   ParserModel:
     Type: String
-    Default: anthropic.claude-opus-5-5
+    Default: us.anthropic.claude-opus-4-6-v1
     Description: Bedrock model ID. Configuration, not code.
 
   CorsOrigins:

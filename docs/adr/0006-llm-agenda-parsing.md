@@ -18,7 +18,7 @@ Constraints:
 
 ## Decision
 
-- **Model:** Claude Opus 5.5 on Amazon Bedrock (`anthropic.claude-opus-5-5`, effort `low`), called
+- **Model:** Claude Opus 5.5 on Amazon Bedrock (`anthropic.claude-opus-5-5`, effort `low`; until this account gets 5.x access it runs on Opus 4.6, `us.anthropic.claude-opus-4-6-v1`, see docs/lab6-agenda-parser.md), called
   through the Anthropic Messages API (`AnthropicBedrockMantle`). The model ID is configuration
   (`PARSER_MODEL`), so Haiku 5.5 can be swapped in without a code change.
 - **The parser runs outside the VPC** as its own Lambda (`agenda-parser`, same backend image, other
