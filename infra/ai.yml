@@ -50,6 +50,8 @@ Parameters:
 Resources:
   ParserRole:
     Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -77,6 +79,8 @@ Resources:
 
   ParserLogGroup:
     Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ProjectName}-agenda-parser"
       RetentionInDays: 14
@@ -86,6 +90,8 @@ Resources:
 
   ParserFunction:
     Type: AWS::Lambda::Function
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Sub "${ProjectName}-agenda-parser"
       Description: Parses pasted text into an agenda with Claude on Bedrock (suggests, never writes)
@@ -120,6 +126,8 @@ Resources:
   # Public, but the handler rejects any request without a valid Cognito token.
   ParserUrl:
     Type: AWS::Lambda::Url
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TargetFunctionArn: !GetAtt ParserFunction.Arn
       AuthType: NONE
@@ -132,6 +140,8 @@ Resources:
 
   ParserUrlPermission:
     Type: AWS::Lambda::Permission
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Ref ParserFunction
       Action: lambda:InvokeFunctionUrl
@@ -140,6 +150,8 @@ Resources:
 
   ParserUrlInvokePermission:
     Type: AWS::Lambda::Permission
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Ref ParserFunction
       Action: lambda:InvokeFunction
@@ -149,6 +161,8 @@ Resources:
   # The cheapest insurance in the course.
   MonthlyBudget:
     Type: AWS::Budgets::Budget
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Budget:
         BudgetName: !Sub "${ProjectName}-monthly"

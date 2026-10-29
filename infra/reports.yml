@@ -103,6 +103,8 @@ Resources:
   # !GetAtt Bucket.Arn that is a circular dependency; a constructed name is not.
   ReportsBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     DependsOn: MailerInvokePermission
     Properties:
       BucketName: !Sub "${ProjectName}-reports-${AWS::AccountId}"
@@ -139,6 +141,8 @@ Resources:
   # The builder has no NAT; without this its PutObject hangs until the timeout.
   S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Condition: HasS3Endpoint
     Properties:
       VpcEndpointType: Gateway
@@ -150,6 +154,8 @@ Resources:
 
   DeadLetterQueue:
     Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub "${ProjectName}-report-requests-dlq"
       MessageRetentionPeriod: 1209600 # 14 days, the most SQS keeps
@@ -159,6 +165,8 @@ Resources:
 
   RequestQueue:
     Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub "${ProjectName}-report-requests"
       # 6 x the builder's 60 s timeout: a message must not reappear while the
@@ -175,6 +183,8 @@ Resources:
 
   BuilderRole:
     Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -199,6 +209,8 @@ Resources:
 
   BuilderLogGroup:
     Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ProjectName}-report-builder"
       RetentionInDays: 14
@@ -208,6 +220,8 @@ Resources:
 
   BuilderFunction:
     Type: AWS::Lambda::Function
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Sub "${ProjectName}-report-builder"
       Description: Builds reports/<week>.csv from Aurora (backend image, other handler)
@@ -241,6 +255,8 @@ Resources:
   # Lambda polls the queue for the function, so a VPC without NAT is fine.
   BuilderQueueMapping:
     Type: AWS::Lambda::EventSourceMapping
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       EventSourceArn: !GetAtt RequestQueue.Arn
       FunctionName: !Ref BuilderFunction
@@ -250,6 +266,8 @@ Resources:
 
   SchedulerRole:
     Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -274,6 +292,8 @@ Resources:
 
   WeeklySchedule:
     Type: AWS::Scheduler::Schedule
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub "${ProjectName}-weekly-report"
       Description: Request last week's report every Monday morning
@@ -291,6 +311,8 @@ Resources:
 
   MailerRole:
     Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -318,6 +340,8 @@ Resources:
 
   MailerLogGroup:
     Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ProjectName}-report-mailer"
       RetentionInDays: 14
@@ -327,6 +351,8 @@ Resources:
 
   MailerFunction:
     Type: AWS::Lambda::Function
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Sub "${ProjectName}-report-mailer"
       Description: Emails a new reports/*.csv through SES
@@ -392,6 +418,8 @@ Resources:
   # Lets S3 (only from this bucket, in this account) invoke the mailer.
   MailerInvokePermission:
     Type: AWS::Lambda::Permission
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !GetAtt MailerFunction.Arn
       Action: lambda:InvokeFunction
@@ -404,17 +432,23 @@ Resources:
   # SES mails a verification link to this address; click it once.
   SenderIdentity:
     Type: AWS::SES::EmailIdentity
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       EmailIdentity: !Ref SenderEmail
 
   RecipientIdentity:
     Type: AWS::SES::EmailIdentity
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Condition: HasRecipientIdentity
     Properties:
       EmailIdentity: !Ref RecipientEmails
 
   DomainIdentity:
     Type: AWS::SES::EmailIdentity
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Condition: HasDomain
     Properties:
       EmailIdentity: !Ref SenderDomain

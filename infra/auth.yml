@@ -38,6 +38,8 @@ Conditions:
 Resources:
   UserPool:
     Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       UserPoolName: !Sub "${ProjectName}-users"
       # People sign in with their email address; Cognito mails them a code to
@@ -79,6 +81,8 @@ Resources:
   # https://<prefix>.auth.<region>.amazoncognito.com
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       UserPoolId: !Ref UserPool
       # Domain prefixes are unique per region across all accounts.
@@ -87,6 +91,8 @@ Resources:
 
   GoogleIdentityProvider:
     Type: AWS::Cognito::UserPoolIdentityProvider
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Condition: HasGoogle
     Properties:
       UserPoolId: !Ref UserPool
@@ -106,6 +112,8 @@ Resources:
   # Google.
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       ClientName: !Sub "${ProjectName}-web"
       UserPoolId: !Ref UserPool
@@ -136,6 +144,8 @@ Resources:
   # A version 2 domain has no sign-in page until it has a branding style.
   ManagedLoginBranding:
     Type: AWS::Cognito::ManagedLoginBranding
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       UserPoolId: !Ref UserPool
       ClientId: !Ref UserPoolClient
