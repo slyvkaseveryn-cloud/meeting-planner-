@@ -1,6 +1,15 @@
 terraform {
   required_version = ">= 1.10"
 
+  # State, locking and runs live in HCP Terraform; a merge to main applies.
+  cloud {
+    organization = "ooad-slyvkaseveryn"
+
+    workspaces {
+      name = "spry-severyn-dev"
+    }
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
