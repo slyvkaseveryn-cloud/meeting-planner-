@@ -75,6 +75,17 @@ usually faster, but 2 of 5 had a wrong date, the field users notice last. Both i
 invented no names. Input tokens (~1,250) are mostly the system prompt + tool schema, so they barely depend
 on the text: prompt caching would be the next cost cut.
 
+## CloudWatch log line (`make ai-logs`)
+
+Input #1 on the deployed site (Opus 4.6); the user then changed Minutes 15 → 20 and saved:
+
+```
+[INFO]	2026-10-29T14:10:45.468Z	7e9cb9f4-0be0-4028-bec5-ce13ce37c68c	{"event": "agenda_parsed", "user": "703cc9fc-8071-70f8-6653-357dd5c965e6", "model": "us.anthropic.claude-opus-4-6-v1", "prompt_version": "agenda-v1", "input_tokens": 1300, "output_tokens": 414, "latency_ms": 18453, "cost_usd": 0.01685, "chars": 183}
+```
+
+Same tokens as the local run (1,300 in), slightly longer answer (414 out), $0.0169. Latency 18.5 s
+vs ~5 s locally: the first call after deploy (cold Lambda, new Bedrock client and connection).
+
 ## Answers (Step 5)
 
 *Why Opus 4.6 and not 5.5:* Bedrock refuses every Claude 5.x model on this account ("not available for
@@ -99,7 +110,7 @@ validation and the `owner_id` check. And an item's `owner` is only text (max 200
 access and triggers nothing. The worst case is a wrong name in a form the user reviews, and it stays
 visible later in `ai_suggestion`.
 
-**3. Cost.** One Opus 4.6 parse cost $0.009–0.015, **~$0.013** on average (~1,250 input + ~260 output
+**3. Cost.** The log line above: **$0.01685** for one parse (1,300 in / 414 out). Across the five tests, one Opus 4.6 parse cost $0.009–0.017, **~$0.013** on average (~1,250 input + ~260 output
 tokens). Haiku 4.5 costs ~$0.0023. 20 organisations × 30 agendas/week × 4.33 weeks = **~2,600
 parses/month**: **~$34/month on Opus 4.6**, **~$6/month on Haiku 4.5**. One VPC interface endpoint is
 $7.30/month per AZ (~$14.60 for two), paid even when nobody parses. At this load Opus costs about
@@ -114,5 +125,5 @@ agendas saved with zero edits. The pasted text itself is not stored, so the 500 
 Instead, run an A/B test: send a random half of new parses to agenda-v2 (the version is already in the log
 line and in `ai_suggestion`), and after a few hundred saves compare the two scores. v2 wins if its field
 accuracy is higher, with a confidence interval (bootstrap), at no worse cost per parse and no new injection
-failures. Wrong dates and owners count
-double, because users notice them last.
+failures. Wrong dates and owners count double, because users notice them
+last.
