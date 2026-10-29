@@ -40,6 +40,7 @@ APP_STACK ?= $(PROJECT_NAME)-backend
 ECR_STACK ?= $(PROJECT_NAME)-ecr
 FRONTEND_STACK ?= $(PROJECT_NAME)-frontend
 REPORTS_STACK ?= $(PROJECT_NAME)-reports
+AI_STACK ?= $(PROJECT_NAME)-ai
 API_FUNCTION ?= $(PROJECT_NAME)-backend
 IMAGE_TAG ?= latest
 # x86_64 or arm64. arm64 is ~20% cheaper on Lambda and builds natively on
@@ -97,7 +98,8 @@ endef
 .PHONY: help up up-build down down-v logs ps migrate revision seed test lint fmt shell-backend psql \
         aws-whoami aws-deploy aws-deploy-auth aws-auth-env aws-ecr aws-push aws-deploy-backend aws-migrate aws-url aws-status aws-logs \
         aws-frontend-cert aws-deploy-frontend aws-frontend-url aws-destroy \
-        aws-deploy-reports report-now reports-ls reports-logs
+        aws-deploy-reports report-now reports-ls reports-logs \
+        llm-hello parse aws-update-api aws-deploy-ai ai-logs
 
 help:
 	@grep -hE '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -429,6 +431,82 @@ reports-logs: ## Show the trigger log lines of the builder and the mailer (last 
 		--start-time $$(( ($$(date +%s) - 86400) * 1000 )) --filter-pattern '"triggered"' --query 'events[].message' --output text
 	$(AWS) logs filter-log-events --log-group-name /aws/lambda/$(PROJECT_NAME)-report-mailer \
 		--start-time $$(( ($$(date +%s) - 86400) * 1000 )) --filter-pattern '"triggered"' --query 'events[].message' --output text
+
+# --- agenda parser (Lab 6) ----------------------------------------------------
+# llm-hello and parse run on your laptop, in the backend image, with the AWS
+# credentials from ~/.aws (AWS_PROFILE is passed through).
+LOCAL_AI_IMAGE = $(PROJECT_NAME)-ai-local
+PARSER_MODEL ?= us.anthropic.claude-opus-4-6-v1
+local-ai = docker build -q -f backend/Dockerfile.lambda -t $(LOCAL_AI_IMAGE) ./backend >/dev/null && \
+	docker run --rm -i --entrypoint python -v "$(HOME)/.aws:/root/.aws:ro" -e HOME=/root \
+		-e AWS_PROFILE -e AWS_REGION=us-east-1 -e PARSER_MODEL=$(PARSER_MODEL) $(LOCAL_AI_IMAGE)
+
+# Build the backend image, push it to the API's repository tagged with the
+# commit, and leave its repo@digest in $$imageuri.
+define build-push
+image=$$($(AWS) lambda get-function --function-name $(API_FUNCTION) --query Code.ImageUri --output text | tr -d '[:space:]'); \
+	repo=$${image%@*}; repo=$${repo%:*}; tag=$(1)-$$(git rev-parse --short HEAD); \
+	echo "Building $$repo:$$tag ($(IMAGE_PLATFORM))"; \
+	$(AWS) ecr get-login-password | docker login --username AWS --password-stdin "$${repo%%/*}" || exit 1; \
+	docker build --platform $(IMAGE_PLATFORM) --provenance=false \
+		-f backend/Dockerfile.lambda -t "$$repo:$$tag" ./backend || exit 1; \
+	docker push "$$repo:$$tag" || exit 1; \
+	digest=$$($(AWS) ecr describe-images --repository-name "$${repo#*/}" --image-ids imageTag=$$tag \
+		--query 'imageDetails[0].imageDigest' --output text | tr -d '[:space:]'); \
+	imageuri="$$repo@$$digest"
+endef
+
+llm-hello: ## Call Claude on Bedrock once from your laptop: answer, stop_reason, usage
+	@$(local-ai) -m app.ai.agenda --hello
+
+parse: ## Parse an agenda from your laptop: make parse TEXT="Пн 10:00, синк ..."
+	@test -n "$(TEXT)" || { echo 'Usage: make parse TEXT="..."'; exit 1; }
+	@$(local-ai) -m app.ai.agenda "$(TEXT)"
+
+aws-update-api: ## Ship new backend code to the API function (keeps its settings), then migrate
+	@$(call build-push,api); \
+		$(AWS) lambda update-function-code --function-name $(API_FUNCTION) --image-uri "$$imageuri" \
+			--query LastUpdateStatus --output text && \
+		$(AWS) lambda wait function-updated-v2 --function-name $(API_FUNCTION) && echo "API updated"
+	@err=$$($(AWS) lambda invoke --function-name $(API_FUNCTION) \
+			--cli-binary-format raw-in-base64-out --payload '{"action":"migrate"}' \
+			--query FunctionError --output text /dev/null | tr -d '[:space:]'); \
+		test "$$err" = "None" && echo "Migrated" || { echo "Migration failed ($$err) — see make aws-logs"; exit 1; }
+
+aws-deploy-ai: ## Build+push the image, deploy infra/ai.yml (agenda parser + $5 budget), print the parser URL
+	@test -n "$(or $(BUDGET_EMAIL),$(REPORTS_SENDER))" || { echo "Set BUDGET_EMAIL in .env"; exit 1; }
+	@$(call build-push,ai); \
+		cfg() { $(AWS) lambda get-function-configuration --function-name $(API_FUNCTION) \
+			--query "Environment.Variables.$$1" --output text | tr -d '[:space:]'; }; \
+		cors="$(AI_CORS_ORIGINS)"; [ -n "$$cors" ] || cors=$$(cfg CORS_ORIGINS); \
+		case "$$cors" in ""|None) cors='*' ;; esac; \
+		arch=$$($(AWS) lambda get-function-configuration --function-name $(API_FUNCTION) \
+			--query 'Architectures[0]' --output text | tr -d '[:space:]'); \
+		echo "cors=$$cors cognito=$$(cfg COGNITO_USER_POOL_ID) model=$(PARSER_MODEL)"; \
+		$(call clear-failed-create,$(AI_STACK)); \
+		$(AWS) cloudformation deploy \
+			--stack-name $(AI_STACK) \
+			--template-file infra/ai.yml \
+			--capabilities CAPABILITY_IAM \
+			--no-fail-on-empty-changeset \
+			$(STACK_TAGS) \
+			--parameter-overrides \
+				"ProjectName=$(PROJECT_NAME)" \
+				"ImageUri=$$imageuri" \
+				"Architecture=$$arch" \
+				"ParserModel=$(PARSER_MODEL)" \
+				"CorsOrigins=$$cors" \
+				"AppTimezone=$(or $(APP_TIMEZONE),Europe/Kyiv)" \
+				"CognitoRegion=$$(cfg COGNITO_REGION)" \
+				"CognitoUserPoolId=$$(cfg COGNITO_USER_POOL_ID)" \
+				"CognitoClientId=$$(cfg COGNITO_CLIENT_ID)" \
+				"BudgetEmail=$(or $(BUDGET_EMAIL),$(REPORTS_SENDER))"
+	@echo "NEXT_PUBLIC_PARSER_URL=$$($(call stack-output,$(AI_STACK),ParserUrl) | tr -d '[:space:]')"
+
+ai-logs: ## Show the agenda_parsed log lines (last 24 h)
+	@$(AWS) logs filter-log-events --log-group-name /aws/lambda/$(PROJECT_NAME)-agenda-parser \
+		--start-time $$(( ($$(date +%s) - 86400) * 1000 )) --filter-pattern '"agenda_parsed"' \
+		--query 'events[].message' --output text
 
 aws-destroy: ## Delete every stack, including the database and its data
 	$(require-aws-credentials)

@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # empty they are fetched from Cognito on first use.
     cognito_jwks: str = ""
 
+    # The agenda parser (Lab 6). The model is configuration, not code.
+    parser_model: str = "us.anthropic.claude-opus-4-6-v1"
+    bedrock_region: str = "us-east-1"
+
     @field_validator("app_timezone")
     @classmethod
     def _validate_timezone(cls, value: str) -> str:
