@@ -61,8 +61,8 @@ resource "aws_lambda_function" "parser" {
       BEDROCK_REGION       = var.region
       APP_TIMEZONE         = var.app_timezone
       COGNITO_REGION       = var.cognito_region
-      COGNITO_USER_POOL_ID = var.cognito_user_pool_id
-      COGNITO_CLIENT_ID    = var.cognito_client_id
+      COGNITO_USER_POOL_ID = aws_cognito_user_pool.site.id
+      COGNITO_CLIENT_ID    = aws_cognito_user_pool_client.site.id
       # Never opened: the parser has no database. Set so settings load.
       DATABASE_URL = "postgresql+asyncpg://unused@localhost/unused"
     }

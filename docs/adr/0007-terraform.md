@@ -16,11 +16,18 @@ re-created.
 
 - **Terraform** (`hashicorp/aws ~> 6.0`) describes those three parts in `infra/auth.tf`, `reports.tf`,
   `ai.tf`. One root module, one HCP Terraform workspace `spry-severyn-dev` (Remote execution).
+- **Sign-in is the pool the site really uses.** `auth.yml` described a us-east-1 pool, but the site
+  signs in with `eu-north-1_L3W21SVtG`, made by hand in the console and in no template: the hand-made
+  resource from Part 0. `auth.tf` adopts it through a second provider (`alias = "eu_north_1"`): pool
+  (deletion protection on), domain, Google IdP, both clients and their brandings, with the Google secret
+  as a sensitive variable. The us-east-1 pool from `auth.yml` stays managed in `auth_legacy.tf`
+  (`moved` blocks, nothing re-created) until its one user is moved or it is deleted.
 - **Migration without re-creation:** `DeletionPolicy: Retain` on every resource, stacks deleted, then
-  `import` blocks. The plan was `38 to import, 0 to add, 0 to destroy`. Nothing was re-created. Two
+  `import` blocks. The plan was `38 to import, 0 to add, 0 to destroy`, then `7 to import` for the
+  eu-north-1 pool. Nothing was re-created (45 imported, 0 re-created). Two
   in-place updates: the builder's `DATABASE_URL` was marked sensitive (same value), and the mailer's code
   was re-uploaded from `infra/mailer/index.py` (same code, was inline `ZipFile`). The next plan:
-  `No changes`.
+  `No changes`. The Google IdP's `client_secret` was likewise only marked sensitive (value unchanged).
 - **Who changes infrastructure:** anyone, through a pull request. HCP Terraform posts the plan as a check,
   a reviewer reads the plan, and the merge to `main` applies it. HCP Terraform reaches AWS with **dynamic
   credentials**: an OIDC token per run, exchanged for the role `hcp-terraform-<org>` (bootstrap, local
@@ -50,11 +57,9 @@ re-created.
 - **If HCP Terraform is down:** the application keeps running (HCP is not in the request path). Plans and
   applies wait. `make` targets that read `terraform output` fail until it returns. In an emergency, the
   latest state version can be downloaded and applied locally, then pushed back, with the workspace locked.
-- **Not managed yet:** the live site signs in with a pool created by hand in **eu-north-1**
-  (`eu-north-1_L3W21SVtG`, with Google), while `auth.tf` describes the pool from Lab 4's stack in
-  us-east-1. That is exactly the "hand-made resource" from Part 0. Next step: import it with a second
-  `aws` provider (`alias = "eu_north_1"`) and its Google secret as a sensitive variable, then decide
-  which pool to keep.
+- **Two pools for now:** the site's (eu-north-1) and the legacy one (us-east-1, one user, not used by
+  the site). `make aws-deploy-backend` / `aws-deploy-frontend` now read the eu-north-1 pool from the
+  Terraform outputs, so they no longer point the site at the wrong pool.
 - **Drift is visible:** every plan compares with the real resources. A console fix must become a pull
   request the same day, or the next apply undoes it.
 - **Open risks:** the bootstrap role has `AdministratorAccess` (to be narrowed to IAM, Lambda, S3, SQS,

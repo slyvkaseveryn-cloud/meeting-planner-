@@ -1,31 +1,40 @@
 # What the Makefile and the frontend build read: terraform output -raw <name>.
 
-# --- auth ---
+# --- auth (the eu-north-1 pool the site signs in with) ---
+output "cognito_region" {
+  value = var.cognito_region
+}
+
 output "user_pool_id" {
-  value = aws_cognito_user_pool.main.id
+  value = aws_cognito_user_pool.site.id
 }
 
 output "user_pool_client_id" {
-  value = aws_cognito_user_pool_client.web.id
+  value = aws_cognito_user_pool_client.site.id
 }
 
 output "issuer" {
   description = "The \"iss\" of every token; its signing keys are at <issuer>/.well-known/jwks.json"
-  value       = "https://cognito-idp.${var.region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
+  value       = "https://cognito-idp.${var.cognito_region}.amazonaws.com/${aws_cognito_user_pool.site.id}"
 }
 
 output "hosted_domain" {
   description = "Cognito's OAuth domain, which the frontend sends Google sign-in through"
-  value       = "${aws_cognito_user_pool_domain.main.domain}.auth.${var.region}.amazoncognito.com"
+  value       = "${aws_cognito_user_pool_domain.site.domain}.auth.${var.cognito_region}.amazoncognito.com"
 }
 
 output "google_redirect_uri" {
-  description = "Add this to the Google client's \"Authorized redirect URIs\""
-  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.region}.amazoncognito.com/oauth2/idpresponse"
+  description = "Must be in the Google client's \"Authorized redirect URIs\""
+  value       = "https://${aws_cognito_user_pool_domain.site.domain}.auth.${var.cognito_region}.amazoncognito.com/oauth2/idpresponse"
 }
 
 output "google_enabled" {
-  value = local.has_google
+  value = true
+}
+
+output "legacy_user_pool_id" {
+  description = "The us-east-1 pool from auth.yml, not used by the site"
+  value       = aws_cognito_user_pool.legacy.id
 }
 
 # --- reports ---

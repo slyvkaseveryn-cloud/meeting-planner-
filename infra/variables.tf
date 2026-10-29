@@ -34,7 +34,13 @@ variable "architecture" {
 
 # --- auth (Lab 4) -------------------------------------------------------------
 
-variable "app_urls" {
+variable "cognito_region" {
+  type        = string
+  default     = "eu-north-1"
+  description = "Region of the user pool the site signs in with (auth.tf)."
+}
+
+variable "site_urls" {
   type        = list(string)
   description = <<-EOT
     Every URL the site is served from, each ending in "/": Cognito sends people
@@ -42,10 +48,14 @@ variable "app_urls" {
   EOT
 }
 
+variable "app_urls" {
+  type        = list(string)
+  description = "Redirect URLs of the legacy us-east-1 pool's client (auth_legacy.tf)."
+}
+
 variable "google_client_id" {
   type        = string
-  default     = ""
-  description = "OAuth client id of a Google \"Web application\" client. Empty leaves Google sign-in out."
+  description = "OAuth client id of the Google \"Web application\" client."
 }
 
 variable "google_client_secret" {
@@ -132,19 +142,6 @@ variable "parser_model" {
 variable "cors_origins" {
   type        = list(string)
   description = "Origins of the site that may call the parser."
-}
-
-variable "cognito_region" {
-  type        = string
-  description = "Region of the user pool the site signs in with (the parser checks its tokens)."
-}
-
-variable "cognito_user_pool_id" {
-  type = string
-}
-
-variable "cognito_client_id" {
-  type = string
 }
 
 variable "budget_email" {

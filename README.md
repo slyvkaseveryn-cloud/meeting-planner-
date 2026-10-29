@@ -30,9 +30,9 @@ The backend applies migrations on start.
 
 Every page except the login page, and every `/api/v1` endpoint, needs a
 signed-in user, and each user sees only their own meetings. Sign-in is an AWS
-Cognito user pool (`infra/auth.tf`, Terraform): email + password, and Google
-when it is configured. Even for local development the pool lives in AWS (it is
-free at this scale). Its redirect URLs are `app_urls` in `infra/terraform.tfvars`;
+Cognito user pool in **eu-north-1** (`infra/auth.tf`, Terraform): email +
+password, and Google. Even for local development the pool lives in AWS (it is
+free at this scale). Its redirect URLs are `site_urls` in `infra/terraform.tfvars`;
 change them in a pull request (see [Infrastructure as code](#infrastructure-as-code-terraform)).
 
 ```bash
@@ -41,8 +41,8 @@ make aws-auth-env      # prints COGNITO_* lines: paste them into .env
 docker compose up -d   # restart so the API and the frontend pick them up
 ```
 
-**Google sign-in** (optional): in Google Cloud console create an OAuth client of
-type *Web application*, set its id as `google_client_id` in
+**Google sign-in**: the OAuth client of type *Web application* in Google Cloud
+console; its id is `google_client_id` in
 `infra/terraform.tfvars` and its secret as the **sensitive** Terraform variable
 `google_client_secret` in the HCP Terraform workspace (never in a file), merge,
 and add the `google_redirect_uri` output
@@ -120,6 +120,8 @@ Things that are already taken care of, and why:
 
 Sign-in, the weekly report and the agenda parser are Terraform in `infra/`
 (`auth.tf`, `reports.tf`, `ai.tf`; Lab 7, [ADR 0007](docs/adr/0007-terraform.md)).
+`auth.tf` uses a second provider for eu-north-1, where the site's user pool is;
+`auth_legacy.tf` keeps the old us-east-1 pool from Lab 4.
 Their state lives in the HCP Terraform workspace `spry-severyn-dev`, which is
 connected to this repository with `infra` as its working directory:
 
@@ -182,7 +184,7 @@ the pool's ids into its build. Each step can also run on its own.
 The backend Lambda sits in a VPC with no internet access, so it cannot download
 the pool's signing keys itself; `aws-deploy-backend` fetches them
 (`<issuer>/.well-known/jwks.json`) and passes them in as `COGNITO_JWKS`.
-Once the CloudFront URL exists, add it to `app_urls` in `infra/terraform.tfvars`
+Once the CloudFront URL exists, add it to `site_urls` in `infra/terraform.tfvars`
 (a pull request), so Cognito may redirect back to the site after Google sign-in.
 
 Fill these in `.env` first:
@@ -389,7 +391,7 @@ sent, so every client shows the same time as the day it was listed under.
 ```
 backend/    FastAPI app (api → services → repositories → models), Alembic, tests
 frontend/   Next.js app, shadcn/ui primitives in components/ui
-infra/      Terraform (*.tf: auth, reports, ai) + CloudFormation (ecr, backend, frontend)
+infra/      Terraform (*.tf: auth, auth_legacy, reports, ai) + CloudFormation (ecr, backend, frontend)
 docker-compose.yml
 ```
 
