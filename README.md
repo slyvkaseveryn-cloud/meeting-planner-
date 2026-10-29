@@ -30,20 +30,23 @@ The backend applies migrations on start.
 
 Every page except the login page, and every `/api/v1` endpoint, needs a
 signed-in user, and each user sees only their own meetings. Sign-in is an AWS
-Cognito user pool (`infra/auth.yml`): email + password, and Google when it is
-configured. Even for local development the pool lives in AWS (it is free at
-this scale):
+Cognito user pool in **eu-north-1** (`infra/auth.tf`, Terraform): email +
+password, and Google. Even for local development the pool lives in AWS (it is
+free at this scale). Its redirect URLs are `site_urls` in `infra/terraform.tfvars`;
+change them in a pull request (see [Infrastructure as code](#infrastructure-as-code-terraform)).
 
 ```bash
-make aws-deploy-auth   # create/update the user pool; allows http://localhost:$FRONTEND_PORT/
+make infra-init        # once: connect infra/ to the HCP Terraform workspace
 make aws-auth-env      # prints COGNITO_* lines: paste them into .env
 docker compose up -d   # restart so the API and the frontend pick them up
 ```
 
-**Google sign-in** (optional): in Google Cloud console create an OAuth client of
-type *Web application*, put its id and secret in `.env` as `GOOGLE_CLIENT_ID` /
-`GOOGLE_CLIENT_SECRET`, run `make aws-deploy-auth`, and add the redirect URI it
-prints (`https://<prefix>.auth.<region>.amazoncognito.com/oauth2/idpresponse`)
+**Google sign-in**: the OAuth client of type *Web application* in Google Cloud
+console; its id is `google_client_id` in
+`infra/terraform.tfvars` and its secret as the **sensitive** Terraform variable
+`google_client_secret` in the HCP Terraform workspace (never in a file), merge,
+and add the `google_redirect_uri` output
+(`https://<prefix>.auth.<region>.amazoncognito.com/oauth2/idpresponse`)
 to the client's *Authorized redirect URIs*. Without it the Google button says
 Google sign-in is not enabled.
 
@@ -113,11 +116,39 @@ Things that are already taken care of, and why:
 - Keep `.env` with LF line endings (copying `.env.example` does): `make` reads
   it directly, and a CRLF `.env` leaves a stray `\r` on every value.
 
+## Infrastructure as code (Terraform)
+
+Sign-in, the weekly report and the agenda parser are Terraform in `infra/`
+(`auth.tf`, `reports.tf`, `ai.tf`; Lab 7, [ADR 0007](docs/adr/0007-terraform.md)).
+`auth.tf` uses a second provider for eu-north-1, where the site's user pool is;
+`auth_legacy.tf` keeps the old us-east-1 pool from Lab 4.
+Their state lives in the HCP Terraform workspace `spry-severyn-dev`, which is
+connected to this repository with `infra` as its working directory:
+
+- a pull request that touches `infra/` gets a **plan** as a check;
+- a merge to `main` **applies** it, with short-lived AWS credentials (OIDC,
+  `TFC_AWS_PROVIDER_AUTH`). Nobody applies from a laptop and no AWS key is
+  stored in HCP Terraform.
+
+```bash
+terraform login        # once: an HCP Terraform token in ~/.terraform.d
+make infra-init        # once: connect infra/ to the workspace
+make infra-plan        # preview your change (runs in HCP Terraform)
+make infra-fmt         # fmt + validate before you commit
+```
+
+Non-secret values are in `infra/terraform.tfvars`. Secrets
+(`google_client_secret`) are sensitive variables in the workspace. The report
+builder copies `DATABASE_URL` from the API function, so the database password is
+not copied anywhere new (it is in the state, which HCP Terraform encrypts).
+Lambda **code** still ships with `make aws-deploy-reports` / `make aws-deploy-ai`
+(`update-function-code`); Terraform ignores `image_uri` after creation.
+
 ## Deploy to AWS
 
-`infra/` holds four CloudFormation templates: `auth.yml` (Cognito sign-in),
-`ecr.yml` (image registry), `backend.yml` (API and database) and `frontend.yml`
-(site). `make` reads `.env`,
+`infra/` also holds three CloudFormation templates: `ecr.yml` (image registry),
+`backend.yml` (API and database) and `frontend.yml` (site); Terraform reads
+nothing from them but the API function's name. `make` reads `.env`,
 so the `aws-*` targets pick up the credentials and settings from there; `.env` is
 gitignored, so real keys never reach the repository. The AWS CLI runs in the
 `amazon/aws-cli` container, so nothing has to be installed on the host besides
@@ -135,25 +166,26 @@ balancer: the browser calls the API on its function URL, and FastAPI's CORS
 settings allow it.
 
 Every stack is tagged `PROJECT_NAME=<value of PROJECT_NAME>`, and every resource
-that accepts tags also carries it explicitly in the templates. Filter by it in
+that accepts tags also carries it explicitly in the templates (in Terraform:
+`default_tags` in `infra/versions.tf`). Filter by it in
 Cost Explorer or Resource Groups to see everything the project owns.
 
 ### One command
 
 ```bash
 make aws-whoami   # check the credentials work
-make aws-deploy   # sign-in, then the backend, then the frontend built against both
+make aws-deploy   # the backend, then the frontend built against it
 ```
 
-`aws-deploy` runs `aws-deploy-auth` and then the two steps below in order: the
-backend checks tokens from the user pool, and the frontend bakes the API URL and
+`aws-deploy` runs the two steps below in order (the user pool comes from
+Terraform, see above): the backend checks tokens from the user pool, and the frontend bakes the API URL and
 the pool's ids into its build. Each step can also run on its own.
 
 The backend Lambda sits in a VPC with no internet access, so it cannot download
 the pool's signing keys itself; `aws-deploy-backend` fetches them
 (`<issuer>/.well-known/jwks.json`) and passes them in as `COGNITO_JWKS`.
-`aws-deploy-frontend` re-deploys the auth stack once the CloudFront URL exists,
-so Cognito may redirect back to the site after Google sign-in.
+Once the CloudFront URL exists, add it to `site_urls` in `infra/terraform.tfvars`
+(a pull request), so Cognito may redirect back to the site after Google sign-in.
 
 Fill these in `.env` first:
 
@@ -359,7 +391,7 @@ sent, so every client shows the same time as the day it was listed under.
 ```
 backend/    FastAPI app (api → services → repositories → models), Alembic, tests
 frontend/   Next.js app, shadcn/ui primitives in components/ui
-infra/      CloudFormation templates behind the aws-* targets
+infra/      Terraform (*.tf: auth, auth_legacy, reports, ai) + CloudFormation (ecr, backend, frontend)
 docker-compose.yml
 ```
 

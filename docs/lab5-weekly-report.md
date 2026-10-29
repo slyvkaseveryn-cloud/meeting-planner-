@@ -6,8 +6,8 @@
 |---|---|---|
 | `build_weekly_report(week)`: the CSV, no AWS | `backend/app/reports/weekly.py` | called by the builder, or `python -m app.reports.weekly 2026-W40` locally |
 | report-builder Lambda (backend image, in the VPC) | `backend/app/reports/lambda_handler.py` | SQS message (from the schedule or `make report-now`) |
-| report-mailer Lambda (inline, outside the VPC) | `infra/reports.yml` (`MailerFunction`) | S3 `ObjectCreated` on `reports/*.csv` |
-| Queue + DLQ, bucket, S3 gateway endpoint, schedule, SES identities | `infra/reports.yml` | `make aws-deploy-reports` |
+| report-mailer Lambda (inline, outside the VPC) | `infra/reports.tf` (`aws_lambda_function.mailer`, code in `infra/mailer/index.py`) | S3 `ObjectCreated` on `reports/*.csv` |
+| Queue + DLQ, bucket, S3 gateway endpoint, schedule, SES identities | `infra/reports.tf` | Terraform (HCP Terraform, Lab 7) |
 
 The schedule sends a **command** (`{"week": null, "source": "schedule"}`) to SQS. The builder writes
 `reports/<week>.csv`; S3 turns that into an **event** (`ObjectCreated`). The mailer reacts to the event.
@@ -16,7 +16,7 @@ The builder does not know the mailer exists.
 Commands:
 
 ```bash
-make aws-deploy-reports            # build+push the image, deploy the stack
+make aws-deploy-reports            # build+push the image, ship it to the builder (infra: Terraform)
 make report-now WEEK=2026-W40      # on-demand report through SQS
 make reports-ls                    # aws s3 ls s3://<bucket>/reports/ --recursive
 make reports-logs                  # the "triggered" log lines of both functions
