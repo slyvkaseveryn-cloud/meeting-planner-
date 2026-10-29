@@ -6,7 +6,7 @@
 make llm-hello                          # first call from the laptop
 make parse TEXT="Пн 10:00, синк ..."    # the parser from the laptop: JSON + usage
 make aws-update-api                     # API gets PUT /meetings/{id}/agenda + migration 0003
-make aws-deploy-ai                      # parser Lambda + function URL + $5 budget; prints the URL
+make aws-deploy-ai                      # ship the image to the parser, print its URL (infra: infra/ai.tf)
 make ai-logs                            # the agenda_parsed log lines
 ```
 
