@@ -1,4 +1,4 @@
-project_id   = "spry-severyn-2026"
+project_id   = "meetings-slyvka"
 project_name = "spry-severyn"
 region       = "us-central1"
 
