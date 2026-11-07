@@ -213,7 +213,8 @@ gcp-deploy-frontend: ## Build the static site against /api (Firebase rewrites it
 			--build-arg NEXT_PUBLIC_COGNITO_DOMAIN="$$($(call tf-output,hosted_domain))" \
 			--build-arg NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED="$$($(call tf-output,google_enabled))" \
 			./frontend || exit 1; \
-		cd frontend && $(FIREBASE) deploy --only hosting --project "$$($(call gcp-output,project_id))"
+		project=$$($(call gcp-output,project_id)); \
+		cd frontend && $(FIREBASE) deploy --only hosting --project "$$project"
 	@$(MAKE) --no-print-directory gcp-url
 
 gcp-url: ## Print the Firebase Hosting URL of the site

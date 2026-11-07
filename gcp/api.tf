@@ -114,9 +114,11 @@ resource "google_cloud_run_v2_service" "api" {
     ]
   }
 
+  # The revision reads version "latest", which must exist before it starts.
   depends_on = [
     google_project_iam_member.api_sql_client,
     google_secret_manager_secret_iam_member.api_database_url,
+    google_secret_manager_secret_version.database_url,
   ]
 }
 
