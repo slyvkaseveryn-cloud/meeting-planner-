@@ -59,6 +59,13 @@ TF = terraform -chdir=infra
 # $(call tf-output,<output name>)
 tf-output = $(TF) output -raw $(1)
 
+# Google Cloud (Lab 9): the core (site, API, database) also runs there, from
+# gcp/ with its own HCP Terraform workspace. Sign-in stays on AWS.
+GCLOUD ?= gcloud
+FIREBASE ?= npx --yes firebase-tools@14
+GCP_TF = terraform -chdir=gcp
+gcp-output = $(GCP_TF) output -raw $(1)
+
 # $(call stack-output,<stack>,<output key>)
 stack-output = $(AWS) cloudformation describe-stacks --stack-name $(1) \
 	--query 'Stacks[0].Outputs[?OutputKey==`$(2)`].OutputValue' --output text
@@ -100,7 +107,7 @@ define require-db-password
 endef
 
 .PHONY: help up up-build down down-v logs ps migrate revision seed test lint fmt shell-backend psql \
-        aws-whoami aws-deploy infra-init infra-plan infra-fmt aws-auth-env aws-ecr aws-push aws-deploy-backend aws-migrate aws-url aws-status aws-logs \
+        aws-whoami aws-deploy infra-init infra-plan infra-fmt gcp-init gcp-plan gcp-push gcp-deploy-backend gcp-deploy-frontend gcp-url aws-auth-env aws-ecr aws-push aws-deploy-backend aws-migrate aws-url aws-status aws-logs \
         aws-frontend-cert aws-deploy-frontend aws-frontend-url aws-destroy \
         aws-deploy-reports report-now reports-ls reports-logs \
         llm-hello parse aws-update-api aws-deploy-ai ai-logs
@@ -172,6 +179,46 @@ infra-plan: ## Preview a change to the Terraform in infra/ (runs in HCP Terrafor
 infra-fmt: ## Format and validate the Terraform in infra/
 	$(TF) fmt -recursive
 	$(TF) validate
+
+# --- Google Cloud (Lab 9) -----------------------------------------------------
+# Terraform in gcp/ owns the project's services, Cloud SQL, the secret and the
+# Cloud Run service; these targets only ship code, as on AWS.
+
+gcp-init: ## Connect gcp/ to its HCP Terraform workspace (once)
+	$(GCP_TF) init
+
+gcp-plan: ## Preview a change to the Terraform in gcp/ (runs in HCP Terraform; it applies after a merge)
+	$(GCP_TF) plan
+
+gcp-push: ## Build the backend image (plain uvicorn, no Lambda adapter) and push it to Artifact Registry
+	@repo=$$($(call gcp-output,image_repository)); \
+		$(GCLOUD) auth configure-docker "$${repo%%/*}" --quiet >/dev/null && \
+		docker build --platform linux/amd64 -t "$$repo/backend:$(IMAGE_TAG)" ./backend && \
+		docker push "$$repo/backend:$(IMAGE_TAG)"
+
+gcp-deploy-backend: gcp-push ## Push the backend and roll it out to Cloud Run (migrations run at start)
+	@repo=$$($(call gcp-output,image_repository)); \
+		digest=$$(docker inspect --format '{{index .RepoDigests 0}}' "$$repo/backend:$(IMAGE_TAG)"); \
+		$(GCLOUD) run services update "$$($(call gcp-output,api_service))" \
+			--project "$$($(call gcp-output,project_id))" --region "$$($(call gcp-output,region))" \
+			--image "$$digest" --quiet
+	@echo "API: $$($(call gcp-output,api_url))/health"
+
+gcp-deploy-frontend: ## Build the static site against /api (Firebase rewrites it to Cloud Run) and deploy to Firebase Hosting
+	@rm -rf frontend/out; \
+		docker build --target export --output type=local,dest=frontend/out \
+			--build-arg NEXT_PUBLIC_API_BASE_URL= \
+			--build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID="$$($(call tf-output,user_pool_id))" \
+			--build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID="$$($(call tf-output,user_pool_client_id))" \
+			--build-arg NEXT_PUBLIC_COGNITO_DOMAIN="$$($(call tf-output,hosted_domain))" \
+			--build-arg NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED="$$($(call tf-output,google_enabled))" \
+			./frontend || exit 1; \
+		project=$$($(call gcp-output,project_id)); \
+		cd frontend && $(FIREBASE) deploy --only hosting --project "$$project"
+	@$(MAKE) --no-print-directory gcp-url
+
+gcp-url: ## Print the Firebase Hosting URL of the site
+	@echo "https://$$($(call gcp-output,project_id)).web.app"
 
 aws-auth-env: ## Print the Cognito settings to put in .env for local development
 	@echo "COGNITO_USER_POOL_ID=$$($(call tf-output,user_pool_id))"
