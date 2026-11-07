@@ -7,7 +7,7 @@ image_uri    = "637965527585.dkr.ecr.us-east-1.amazonaws.com/spry-severyn-backen
 
 # auth: the eu-north-1 pool (auth.tf); app_urls belong to the legacy us-east-1 pool
 cognito_region   = "eu-north-1"
-site_urls        = ["https://d1nzs10xorfo1q.cloudfront.net/"]
+site_urls        = ["https://d1nzs10xorfo1q.cloudfront.net/", "https://meetings-slyvka.web.app/"]
 google_client_id = "167569518265-kq7dvgsr9s2ltbb6okob14k8rvpjaheh.apps.googleusercontent.com"
 app_urls         = ["http://localhost:3000/", "https://d1nzs10xorfo1q.cloudfront.net/"]
 
